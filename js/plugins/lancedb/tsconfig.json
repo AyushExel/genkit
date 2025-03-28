@@ -2,8 +2,6 @@
   "extends": "../../tsconfig.json",
   "include": ["src"],
   "compilerOptions": {
-    // chromadb does not compile cleany. It tries to import @xenova/transformers and
-    // chromadb-default-embed, which do not seem to be packaged with the library
     "skipLibCheck": true
   }
 }
