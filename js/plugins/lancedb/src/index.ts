@@ -16,62 +16,51 @@
  */
 
 import {
-  connect, // Main lancedb connection function
+  connect,
   Connection,
   Table,
-} from '@lancedb/lancedb'; // LanceDB Typescript SDK
-import { Genkit, z } from 'genkit'; // Assuming genkit core exists
-import { GenkitPlugin, genkitPlugin } from 'genkit/plugin'; // Assuming genkit plugin helpers exist
-
-import { EmbedderArgument, Embedding } from 'genkit/embedder'; // Assuming genkit embedder types
+} from '@lancedb/lancedb';
+import { Genkit, z } from 'genkit';
+import { GenkitPlugin, genkitPlugin } from 'genkit/plugin';
+import { EmbedderArgument, Embedding } from 'genkit/embedder';
 import {
   CommonRetrieverOptionsSchema,
   Document,
   indexerRef,
   retrieverRef,
-} from 'genkit/retriever'; // Assuming genkit retriever types
-import { Md5 } from 'ts-md5'; // For generating IDs
-
-// --- Configuration Schemas ---
-
-// Removed SparseVectorSchema as it's Pinecone-specific
+} from 'genkit/retriever';
+import { Md5 } from 'ts-md5';
 
 enum WriteMode {
   Create = 'create',
   Append = 'append', 
   Overwrite = 'overwrite'
 }
+
 const LanceDBRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
-  k: z.number().int().positive().default(10), // Default k value
-  whereFilter: z.string().optional(), // SQL-like filter string for LanceDB
-  vectorColumnName: z.string().default('vector'), // Default vector column name
-  // Note: LanceDB search typically returns metadata; includeMetadata=True is implicit
-  //       includeValues is usually False for retrieval, vectors fetched separately if needed.
+  k: z.number().int().positive().default(10),
+  whereFilter: z.string().optional(),
+  vectorColumnName: z.string().default('vector'),
 });
 
 const LanceDBIndexerOptionsSchema = z.object({
-  dbUri: z.string(), // LanceDB connection URI (e.g., "./.lancedb", "db://my_database")
+  dbUri: z.string(), 
   tableName: z.string(),
   vectorColumnName: z.string().default('vector'),
-  textColumnName: z.string().default('text'), // Column to store document content
-  metadataColumnName: z.string().default('metadata'), // Column to store stringified JSON metadata
-  writeMode: z.nativeEnum(WriteMode).default(WriteMode.Append), // Append or Overwrite
+  textColumnName: z.string().default('text'),
+  metadataColumnName: z.string().default('metadata'), 
+  writeMode: z.nativeEnum(WriteMode).default(WriteMode.Append),
 });
 
-// Define the expected data structure for LanceDB add/create
-// Adjust based on actual column names used
+
 interface LanceDbDataRow {
-  id: string; // Unique ID for the vector chunk
-  // Use more specific property names to avoid conflicts
-  vectorData?: number[]; // For dynamic vector column
-  textData?: string; // For dynamic text column
-  metadataJson?: string; // For dynamic metadata column
-  
-  // Use a string indexer for truly dynamic properties
+  id: string;
+  vectorData?: number[];
+  textData?: string;
+  metadataJson?: string;
   [key: string]: any;
 }
 
-// --- Ref Helpers ---
 
 /**
  * lancedbRetrieverRef function creates a retriever reference for LanceDB.
@@ -169,7 +158,6 @@ export function configureLanceDBRetriever<
     tableName,
     embedder,
     embedderOptions,
-    //vectorColumnName = 'vector', // Use defaults
     textColumnName = 'text',
     metadataColumnName = 'metadata',
   } = params;
@@ -181,7 +169,7 @@ export function configureLanceDBRetriever<
       configSchema: LanceDBRetrieverOptionsSchema,
     },
     async (
-      content: Document, // Changed from 'content' string to Document type
+      content: Document,
       options: z.infer<typeof LanceDBRetrieverOptionsSchema>
     ): Promise<{ documents: Document[] }> => {
       let db: Connection | null = null;
@@ -194,15 +182,13 @@ export function configureLanceDBRetriever<
           `LanceDB Retriever Error: Failed to connect or open table '${tableName}' at '${dbUri}'. Does it exist?`,
           error
         );
-        // Depending on requirements, might re-throw or return empty results
         return { documents: [] };
       }
 
-      // 1. Embed the query content
-      // Assuming ai.embed takes a Document and returns embeddings for its content parts
+
       const queryEmbeddings: Embedding[] = await ai.embed({
         embedder,
-        content: content, // Pass the Document object
+        content: content,
         options: embedderOptions,
       });
 
@@ -210,27 +196,24 @@ export function configureLanceDBRetriever<
         console.warn('LanceDB Retriever: Query embedding resulted in no vectors.');
         return { documents: [] };
       }
-      const queryVector = queryEmbeddings[0].embedding; // Use the first embedding for query
+      const queryVector = queryEmbeddings[0].embedding; 
 
-      // 2. Perform LanceDB search
       let searchQuery = tbl
-        .vectorSearch(queryVector) // Use vectorSearch method
+        .vectorSearch(queryVector) 
         .limit(options.k);
 
       if (options.whereFilter) {
         searchQuery = searchQuery.where(options.whereFilter);
       }
 
-      // Select columns needed to reconstruct the Document
       const selectColumns = Array.from(
         new Set([textColumnName, metadataColumnName])
-      ); // Ensure unique
+      ); 
       searchQuery = searchQuery.select(selectColumns);
 
       try {
         const results: Record<string, any>[] = await searchQuery.toArray(); // Execute query
 
-        // 3. Format results as Genkit Documents
         const documents: Document[] = results.map((res) => {
           const docContent = res[textColumnName] ?? '';
           const metadataStr = res[metadataColumnName] ?? '{}';
@@ -246,8 +229,6 @@ export function configureLanceDBRetriever<
             docMetadata = { error: 'Failed to parse metadata' };
           }
 
-          // Assuming Document.fromData exists or create Document instances directly
-          // Adjust based on actual Genkit Document structure
           return Document.fromData(docContent, undefined, docMetadata);
         });
 
@@ -257,13 +238,12 @@ export function configureLanceDBRetriever<
           `LanceDB Retriever Error: Search failed for table '${tableName}'`,
           searchError
         );
-        return { documents: [] }; // Return empty on search failure
+        return { documents: [] }; 
       }
     }
   );
 }
 
-// --- Indexer Configuration ---
 
 export function configureLanceDBIndexer<
   EmbedderCustomOptions extends z.ZodTypeAny,
@@ -284,7 +264,7 @@ export function configureLanceDBIndexer<
     tableName,
     embedder,
     embedderOptions,
-    vectorColumnName = 'vector', // Use defaults
+    vectorColumnName = 'vector',
     textColumnName = 'text',
     metadataColumnName = 'metadata',
   } = params;
@@ -296,7 +276,7 @@ export function configureLanceDBIndexer<
     },
     async (
       docs: Document[],
-      options?: z.infer<typeof LanceDBIndexerOptionsSchema> // Passed options override defaults
+      options?: z.infer<typeof LanceDBIndexerOptionsSchema> 
     ) => {
       const effectiveDbUri = options?.dbUri ?? dbUri;
       const effectiveTableName = options?.tableName ?? tableName;
@@ -334,7 +314,6 @@ export function configureLanceDBIndexer<
           console.warn(
             `LanceDB Indexer: Overwriting existing table '${effectiveTableName}'!`
           );
-          // Overwrite happens during the add/create call if mode is Overwrite
         }
       } catch (e) {
         tableExists = false;
@@ -343,11 +322,10 @@ export function configureLanceDBIndexer<
         );
       }
 
-      // 1. Embed all documents concurrently
       const embeddingPromises = docs.map((doc) =>
         ai.embed({
           embedder,
-          content: doc, // Embed the document
+          content: doc,
           options: embedderOptions,
         })
       );
@@ -355,19 +333,14 @@ export function configureLanceDBIndexer<
         embeddingPromises
       );
 
-      // 2. Prepare data for LanceDB add/create
       const dataToAdd: LanceDbDataRow[] = [];
       docs.forEach((doc, i) => {
         const docEmbeddings: Embedding[] = embeddingsForEachDoc[i];
 
-        // Create one LanceDB row per embedding chunk
         docEmbeddings.forEach((embedding) => {
-          // Generate an ID based on embedding content and metadata
-          // Using Md5 like the Pinecone example
-          const docRepr = `${embedding.content}-${JSON.stringify(doc.metadata || {})}`;
+          const docRepr = `${doc.data || doc.toString()}-${JSON.stringify(doc.metadata || {})}`;
           const id = Md5.hashStr(docRepr);
 
-          // Ensure metadata is stringified safely
           let metadataJson = '{}';
           try {
             metadataJson = JSON.stringify(doc.metadata || {});
@@ -381,7 +354,7 @@ export function configureLanceDBIndexer<
           const row: LanceDbDataRow = {
             id: id,
             [effectiveVectorCol]: embedding.embedding,
-            [effectiveTextCol]: embedding.content, // Use content from embedding chunk
+            [effectiveTextCol]: doc.data || doc.toString(),
             [effectiveMetadataCol]: metadataJson,
           };
           dataToAdd.push(row);
@@ -393,27 +366,22 @@ export function configureLanceDBIndexer<
         return;
       }
 
-      // 3. Add data to LanceDB (create table if needed)
       try {
         if (!tableExists) {
-          // Create table with the first batch
           console.log(
             `LanceDB Indexer: Creating table '${effectiveTableName}' with ${dataToAdd.length} records.`
           );
-          // LanceDB infers schema from the data
           tbl = await db.createTable(effectiveTableName, dataToAdd, {
-            mode: WriteMode.Create, // Explicitly create
+            mode: WriteMode.Create,
           });
           console.log(
             `LanceDB Indexer: Successfully created table '${effectiveTableName}'.`
           );
         } else if (tbl) {
-          // Add data to existing table
           if (effectiveWriteMode === WriteMode.Overwrite) {
             console.log(
               `LanceDB Indexer: Overwriting table '${effectiveTableName}' with ${dataToAdd.length} records.`
             );
-            // Create table with overwrite mode effectively replaces the table
             tbl = await db.createTable(effectiveTableName, dataToAdd, {
               mode: WriteMode.Overwrite,
             });
@@ -432,7 +400,6 @@ export function configureLanceDBIndexer<
           `LanceDB Indexer Error: Failed to write data to table '${effectiveTableName}'`,
           writeError
         );
-        // Rethrow or handle as appropriate for your application
         throw new Error(
           `LanceDB Indexer: Failed writing to table ${effectiveTableName}`
         );
@@ -456,7 +423,7 @@ export function configureLanceDBIndexer<
 export async function createLanceDBTable(params: {
   dbUri: string;
   tableName: string;
-  exampleData?: Record<string, any>[]; // Data to infer schema
+  exampleData?: Record<string, any>[];
 }): Promise<Table> {
   const { dbUri, tableName, exampleData } = params;
   if (!exampleData || exampleData.length === 0) {
