@@ -19,7 +19,6 @@ import {
   connect, // Main lancedb connection function
   Connection,
   Table,
-  WriteMode, // Use WriteMode enum for clarity
 } from '@lancedb/lancedb'; // LanceDB Typescript SDK
 import { Genkit, z } from 'genkit'; // Assuming genkit core exists
 import { GenkitPlugin, genkitPlugin } from 'genkit/plugin'; // Assuming genkit plugin helpers exist
@@ -32,12 +31,16 @@ import {
   retrieverRef,
 } from 'genkit/retriever'; // Assuming genkit retriever types
 import { Md5 } from 'ts-md5'; // For generating IDs
-import * as arrow from 'apache-arrow'; // LanceDB often works with Arrow data types
 
 // --- Configuration Schemas ---
 
 // Removed SparseVectorSchema as it's Pinecone-specific
 
+enum WriteMode {
+  Create = 'create',
+  Append = 'append', 
+  Overwrite = 'overwrite'
+}
 const LanceDBRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
   k: z.number().int().positive().default(10), // Default k value
   whereFilter: z.string().optional(), // SQL-like filter string for LanceDB
@@ -59,10 +62,13 @@ const LanceDBIndexerOptionsSchema = z.object({
 // Adjust based on actual column names used
 interface LanceDbDataRow {
   id: string; // Unique ID for the vector chunk
-  [vectorColumn: string]: number[]; // Dynamically named vector column
-  [textColumn: string]: string; // Dynamically named text column
-  [metadataColumn: string]: string; // Dynamically named metadata column (JSON string)
-  // Add other metadata fields directly if preferred over a single JSON string column
+  // Use more specific property names to avoid conflicts
+  vectorData?: number[]; // For dynamic vector column
+  textData?: string; // For dynamic text column
+  metadataJson?: string; // For dynamic metadata column
+  
+  // Use a string indexer for truly dynamic properties
+  [key: string]: any;
 }
 
 // --- Ref Helpers ---
@@ -163,7 +169,7 @@ export function configureLanceDBRetriever<
     tableName,
     embedder,
     embedderOptions,
-    vectorColumnName = 'vector', // Use defaults
+    //vectorColumnName = 'vector', // Use defaults
     textColumnName = 'text',
     metadataColumnName = 'metadata',
   } = params;
@@ -208,7 +214,7 @@ export function configureLanceDBRetriever<
 
       // 2. Perform LanceDB search
       let searchQuery = tbl
-        .vectorSearch(queryVector, vectorColumnName) // Use vectorSearch method
+        .vectorSearch(queryVector) // Use vectorSearch method
         .limit(options.k);
 
       if (options.whereFilter) {
